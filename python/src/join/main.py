@@ -24,10 +24,20 @@ class JoinFilter:
         )
 
     def process_messsage(self, message, ack, nack):
+
         logging.info("Received top")
-        fruit_top = message_protocol.internal.deserialize(message)
-        self.output_queue.send(message_protocol.internal.serialize(fruit_top))
+
+        message_fields = message_protocol.internal.deserialize(message)
+        message_type = message_fields[message_protocol.internal.TYPE]
+
+        if message_type != message_protocol.internal.RESULT:
+            logging.error("Received non-result message")
+            nack()
+            return
+
+        self.output_queue.send(message)
         ack()
+
 
     def start(self):
         self.input_queue.start_consuming(self.process_messsage)

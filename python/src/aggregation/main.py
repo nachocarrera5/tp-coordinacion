@@ -23,38 +23,59 @@ class AggregationFilter:
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, OUTPUT_QUEUE
         )
-        self.fruit_top = []
+        self.fruits_by_client = {}
 
-    def _process_data(self, fruit, amount):
+    def _process_data(self, fruit, amount, client_id):
+
         logging.info("Processing data message")
-        for i in range(len(self.fruit_top)):
-            if self.fruit_top[i].fruit == fruit:
-                self.fruit_top[i] = self.fruit_top[i] + fruit_item.FruitItem(
-                    fruit, amount
-                )
-                return
-        bisect.insort(self.fruit_top, fruit_item.FruitItem(fruit, amount))
 
-    def _process_eof(self):
+        amount_by_fruit = self.fruits_by_client.setdefault(client_id, {})
+
+        current = amount_by_fruit.get(fruit, fruit_item.FruitItem(fruit, 0))
+
+        amount_by_fruit[fruit] = current + fruit_item.FruitItem(fruit, int(amount))
+
+    def _process_eof(self, client_id): # reordeno cuando recibo EOF
+
         logging.info("Received EOF")
-        fruit_chunk = list(self.fruit_top[-TOP_SIZE:])
-        fruit_chunk.reverse()
-        fruit_top = list(
-            map(
-                lambda fruit_item: (fruit_item.fruit, fruit_item.amount),
-                fruit_chunk,
-            )
-        )
-        self.output_queue.send(message_protocol.internal.serialize(fruit_top))
-        del self.fruit_top
+
+        amount_by_fruit = self.fruits_by_client.get(client_id, {})
+
+        top_fruits = sorted(amount_by_fruit.values(), reverse=True)[:TOP_SIZE]
+        
+        result = [
+            [item.fruit, item.amount]
+            for item in top_fruits
+        ]
+
+        message = message_protocol.internal.serialize(client_id, message_protocol.internal.RESULT, result)
+
+        self.output_queue.send(message)
+
+        self.fruits_by_client.pop(client_id, None)
 
     def process_messsage(self, message, ack, nack):
+
         logging.info("Process message")
+
         fields = message_protocol.internal.deserialize(message)
-        if len(fields) == 2:
-            self._process_data(*fields)
+
+        client_id = fields[message_protocol.internal.ID]
+        message_type = fields[message_protocol.internal.TYPE]
+        payload = fields[message_protocol.internal.PAYLOAD]
+
+        if message_type == message_protocol.internal.FRUITS:
+            [fruit, amount] = payload
+            self._process_data(fruit, amount, client_id)
+
+        elif message_type == message_protocol.internal.EOF:
+            self._process_eof(client_id)
+
         else:
-            self._process_eof()
+            logging.warning(f"Unknown message type: {message_type}")
+            nack()
+            return
+
         ack()
 
     def start(self):

@@ -1,8 +1,14 @@
 import json
 
+ID = "id"
+TYPE = "type"
+PAYLOAD = "payload"
+FRUITS = "fruits"
+RESULT = "result" 
+EOF = "eof"
 
-def serialize(message):
-    return json.dumps(message).encode("utf-8")
+def serialize(client_id, message_type, payload):
+    return json.dumps({ID: client_id, TYPE: message_type, PAYLOAD: payload}).encode("utf-8")
 
 
 def deserialize(message):
