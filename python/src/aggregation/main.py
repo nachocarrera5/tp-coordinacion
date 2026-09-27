@@ -24,6 +24,7 @@ class AggregationFilter:
             MOM_HOST, OUTPUT_QUEUE
         )
         self.fruits_by_client = {}
+        self.eof_counter_dict = {}
 
     def _process_data(self, fruit, amount, client_id):
 
@@ -37,22 +38,26 @@ class AggregationFilter:
 
     def _process_eof(self, client_id): # reordeno cuando recibo EOF
 
+        eof_count = self.eof_counter_dict.get(client_id, 0) + 1
+        self.eof_counter_dict[client_id] = eof_count
+
         logging.info("Received EOF")
+
+        if eof_count < SUM_AMOUNT:
+            return
 
         amount_by_fruit = self.fruits_by_client.get(client_id, {})
 
         top_fruits = sorted(amount_by_fruit.values(), reverse=True)[:TOP_SIZE]
         
-        result = [
-            [item.fruit, item.amount]
-            for item in top_fruits
-        ]
+        result = [[item.fruit, item.amount] for item in top_fruits]
 
         message = message_protocol.internal.serialize(client_id, message_protocol.internal.RESULT, result)
 
         self.output_queue.send(message)
 
         self.fruits_by_client.pop(client_id, None)
+        self.eof_counter_dict.pop(client_id, None)
 
     def process_messsage(self, message, ack, nack):
 

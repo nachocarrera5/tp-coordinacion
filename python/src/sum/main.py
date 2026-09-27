@@ -18,29 +18,44 @@ class SumFilter:
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, INPUT_QUEUE
         )
+
+        self.control_exchange_input = middleware.MessageMiddlewareExchangeRabbitMQ( # cola para la replica y el exchange de control
+            MOM_HOST, SUM_CONTROL_EXCHANGE, [f"{SUM_CONTROL_EXCHANGE}"]
+        )
+
+        self.control_exchange_output = middleware.MessageMiddlewareExchangeRabbitMQ( # otra igual para publicar porque la otra queda bloqueadaxw
+            MOM_HOST, SUM_CONTROL_EXCHANGE, [f"{SUM_CONTROL_EXCHANGE}"]
+        )
+
         self.data_output_exchanges = []
+
         for i in range(AGGREGATION_AMOUNT):
             data_output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
                 MOM_HOST, AGGREGATION_PREFIX, [f"{AGGREGATION_PREFIX}_{i}"]
             )
             self.data_output_exchanges.append(data_output_exchange)
+
         self.amount_by_client = {}
+        self.lock = threading.Lock()
 
     def _process_data(self, fruit, amount, client_id):
 
         logging.info(f"Process data")
 
-        amount_by_fruit = self.amount_by_client.setdefault(client_id, {})
+        with self.lock:
 
-        current = amount_by_fruit.get(fruit, fruit_item.FruitItem(fruit, 0))
+            amount_by_fruit = self.amount_by_client.setdefault(client_id, {})
 
-        amount_by_fruit[fruit] = current + fruit_item.FruitItem(fruit, int(amount))
+            current = amount_by_fruit.get(fruit, fruit_item.FruitItem(fruit, 0))
+
+            amount_by_fruit[fruit] = current + fruit_item.FruitItem(fruit, int(amount))
 
     def _process_eof(self, client_id):
 
         logging.info(f"Broadcasting data messages")
 
-        amount_by_fruit = self.amount_by_client.get(client_id, {})
+        with self.lock:
+            amount_by_fruit = self.amount_by_client.pop(client_id, {})
 
         for final_fruit_item in amount_by_fruit.values():
             message = message_protocol.internal.serialize(client_id, message_protocol.internal.FRUITS, [final_fruit_item.fruit, final_fruit_item.amount])
@@ -52,8 +67,6 @@ class SumFilter:
         eof_message = message_protocol.internal.serialize(client_id, message_protocol.internal.EOF, None)
         for data_output_exchange in self.data_output_exchanges:
             data_output_exchange.send(eof_message)
-
-        self.amount_by_client.pop(client_id, None)
 
 
     def process_data_messsage(self, message, ack, nack):
@@ -68,7 +81,7 @@ class SumFilter:
             self._process_data(fruit, amount, client_id)
 
         elif message_type == message_protocol.internal.EOF:
-            self._process_eof(client_id)
+            self.control_exchange_output.send(message) # con esto el eof lo reciben todas las replicas
 
         else:
             logging.warning(f"Unknown message type: {message_type}")
@@ -77,7 +90,25 @@ class SumFilter:
 
         ack()
 
+    def process_control_message(self, message, ack, nack):
+        fields = message_protocol.internal.deserialize(message)
+
+        client_id = fields[message_protocol.internal.ID]
+        message_type = fields[message_protocol.internal.TYPE]
+
+        if message_type != message_protocol.internal.EOF:
+            logging.warning("Wrong control message type")
+            nack()
+            return
+
+        self._process_eof(client_id)
+        ack()
+
     def start(self):
+
+        control_thread = threading.Thread(target=self.control_exchange_input.start_consuming, args=(self.process_control_message,), daemon=True)
+        control_thread.start()
+
         self.input_queue.start_consuming(self.process_data_messsage)
 
 def main():
