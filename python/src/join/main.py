@@ -23,19 +23,50 @@ class JoinFilter:
             MOM_HOST, OUTPUT_QUEUE
         )
 
+        self.top_candidates_by_client = {}
+        self.results_by_client = {}
+
+    def _process_result(self, client_id, aggregation_fruits):
+
+        candidates = self.top_candidates_by_client.setdefault(client_id, [])
+
+        for fruit, amount in aggregation_fruits:
+            candidates.append(fruit_item.FruitItem(fruit, amount))
+
+        results_amount = self.results_by_client.get(client_id, 0) + 1
+
+        self.results_by_client[client_id] = results_amount
+
+        logging.info("Received partial result")
+
+        if results_amount < AGGREGATION_AMOUNT:
+            return
+
+        top_fruits = sorted(candidates, reverse=True)[:TOP_SIZE] # como maximo ordeno cant de aggregation x el top size
+
+        final_result = [[item.fruit, item.amount] for item in top_fruits]
+
+        self.output_queue.send(message_protocol.internal.serialize(client_id, message_protocol.internal.RESULT, final_result))
+
+        self.top_candidates_by_client.pop(client_id, None)
+        self.results_by_client.pop(client_id, None)
+
     def process_messsage(self, message, ack, nack):
 
         logging.info("Received top")
 
         message_fields = message_protocol.internal.deserialize(message)
+
+        client_id = message_fields[message_protocol.internal.ID]
         message_type = message_fields[message_protocol.internal.TYPE]
+        payload = message_fields[message_protocol.internal.PAYLOAD]
 
         if message_type != message_protocol.internal.RESULT:
             logging.error("Received non-result message")
             nack()
             return
 
-        self.output_queue.send(message)
+        self._process_result(client_id, payload)
         ack()
 
 

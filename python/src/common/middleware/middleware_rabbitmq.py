@@ -41,6 +41,7 @@ class _MessageMiddlewareRabbitMQBase:
             on_message_callback(body, ack, nack)
 
         with _pika_error_to_middleware_error("consuming messages", MessageMiddlewareMessageError):
+            self._channel.basic_qos(prefetch_count=1) # linea ausente en tp mom, rabbit adelanta mensajes y hace que falle el escenario 4
             self._channel.basic_consume(queue=self._queue_name, on_message_callback=callback, auto_ack=False) # para queue_name, la cola asigna el nombre recibido, y el exchange, asigna el nombre de la cola generada aleatoriamente y guardada en self._queue_name
             self._channel.start_consuming()
 

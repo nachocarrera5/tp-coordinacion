@@ -1,6 +1,7 @@
 import os
 import logging
 import threading
+import hashlib
 
 from common import middleware, message_protocol, fruit_item
 
@@ -50,6 +51,14 @@ class SumFilter:
 
             amount_by_fruit[fruit] = current + fruit_item.FruitItem(fruit, int(amount))
 
+    def _get_aggregation_index(self, client_id, fruit):
+
+        key = f"{client_id}:{fruit}".encode("utf-8")
+
+        digest = hashlib.md5(key).hexdigest()
+
+        return int(digest, 16) % AGGREGATION_AMOUNT
+
     def _process_eof(self, client_id):
 
         logging.info(f"Broadcasting data messages")
@@ -60,8 +69,9 @@ class SumFilter:
         for final_fruit_item in amount_by_fruit.values():
             message = message_protocol.internal.serialize(client_id, message_protocol.internal.FRUITS, [final_fruit_item.fruit, final_fruit_item.amount])
 
-            for data_output_exchange in self.data_output_exchanges:
-                data_output_exchange.send(message)
+            aggregation_index = self._get_aggregation_index(client_id, final_fruit_item.fruit)
+
+            self.data_output_exchanges[aggregation_index].send(message)
 
         logging.info(f"Broadcasting EOF message")
         eof_message = message_protocol.internal.serialize(client_id, message_protocol.internal.EOF, None)
