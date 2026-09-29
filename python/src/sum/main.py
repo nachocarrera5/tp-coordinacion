@@ -1,6 +1,7 @@
 import os
 import logging
 import threading
+import signal
 
 from common import middleware, message_protocol, fruit_item
 
@@ -110,16 +111,35 @@ class SumFilter:
         self._process_eof(client_id)
         ack()
 
+    # sum necesita otro cierre por los dos hilos, este metodo es el que ejecuta el auxiliar
+    def _consume_control_messages(self):
+        try:
+            self.control_exchange_input.start_consuming(self.process_control_message)
+        finally:
+            self.control_exchange_input.close()
+            for data_outpt_exchange in self.data_output_exchanges:
+                data_outpt_exchange.close()
+
+    def handle_sigterm(self, signum, frame):
+        self.input_queue.stop_consuming()
+
     def start(self):
 
-        control_thread = threading.Thread(target=self.control_exchange_input.start_consuming, args=(self.process_control_message,), daemon=True)
+        control_thread = threading.Thread(target=self._consume_control_messages)
         control_thread.start()
 
-        self.input_queue.start_consuming(self.process_data_messsage)
+        try:
+            self.input_queue.start_consuming(self.process_data_messsage)
+        finally:
+            self.control_exchange_input.stop_consuming()
+            control_thread.join()
+            self.input_queue.close()
+            self.control_exchange_output.close()
 
 def main():
     logging.basicConfig(level=logging.INFO)
     sum_filter = SumFilter()
+    signal.signal(signal.SIGTERM, sum_filter.handle_sigterm)
     sum_filter.start()
     return 0
 

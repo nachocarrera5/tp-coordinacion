@@ -45,15 +45,15 @@ class _MessageMiddlewareRabbitMQBase:
             self._channel.basic_consume(queue=self._queue_name, on_message_callback=callback, auto_ack=False) # para queue_name, la cola asigna el nombre recibido, y el exchange, asigna el nombre de la cola generada aleatoriamente y guardada en self._queue_name
             self._channel.start_consuming()
 
+
+
     def stop_consuming(self):
 
-        self._check_connection()
-
-        if not self._channel.consumer_tags:
+        if self._connection.is_closed:
             return
 
         with _pika_error_to_middleware_error("stopping consumption", MessageMiddlewareMessageError):
-            self._channel.stop_consuming()
+            self._connection.add_callback_threadsafe(self._channel.stop_consuming)
 
     def close(self):
 
