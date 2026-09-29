@@ -24,15 +24,15 @@ class SumFilter:
             MOM_HOST, SUM_CONTROL_EXCHANGE, [f"{SUM_CONTROL_EXCHANGE}"]
         )
 
-        self.control_exchange_output = middleware.MessageMiddlewareExchangeRabbitMQ( # otra igual para publicar porque la otra queda bloqueadaxw
-            MOM_HOST, SUM_CONTROL_EXCHANGE, [f"{SUM_CONTROL_EXCHANGE}"]
+        self.control_exchange_output = middleware.MessageMiddlewareExchangeRabbitMQ( # otra igual para publicar porque la otra queda bloqueada
+            MOM_HOST, SUM_CONTROL_EXCHANGE, [f"{SUM_CONTROL_EXCHANGE}"], create_queue=False # con el False aca me evito copias de colas innecesarias en memoria si el output solo publica
         )
 
         self.data_output_exchanges = []
 
         for i in range(AGGREGATION_AMOUNT):
             data_output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-                MOM_HOST, AGGREGATION_PREFIX, [f"{AGGREGATION_PREFIX}_{i}"]
+                MOM_HOST, AGGREGATION_PREFIX, [f"{AGGREGATION_PREFIX}_{i}"], create_queue=False
             )
             self.data_output_exchanges.append(data_output_exchange)
 

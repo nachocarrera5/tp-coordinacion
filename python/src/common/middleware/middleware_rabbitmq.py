@@ -85,7 +85,7 @@ class MessageMiddlewareQueueRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageMidd
 
 
 class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageMiddlewareExchange):
-    def __init__(self, host, exchange_name, routing_keys):
+    def __init__(self, host, exchange_name, routing_keys, create_queue=True):
 
         self._exchange_name = exchange_name
         self._routing_keys = routing_keys
@@ -95,11 +95,13 @@ class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageM
         with _pika_error_to_middleware_error("exchange initialization", MessageMiddlewareMessageError):
 
             self._channel.exchange_declare(exchange=exchange_name, exchange_type="direct", durable=False)
-            queue = self._channel.queue_declare(queue="", exclusive=True)
-            self._queue_name = queue.method.queue
 
-            for routing_key in self._routing_keys:
-                self._channel.queue_bind(exchange=exchange_name, queue=self._queue_name, routing_key=routing_key)
+            if create_queue:
+                queue = self._channel.queue_declare(queue="", exclusive=True)
+                self._queue_name = queue.method.queue
+
+                for routing_key in self._routing_keys:
+                    self._channel.queue_bind(exchange=exchange_name, queue=self._queue_name, routing_key=routing_key)
 
 
     def send(self, message):
